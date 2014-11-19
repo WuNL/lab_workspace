@@ -1,0 +1,9 @@
+1. initialize all the parameters, connect signal and slot, and connet the laser;
+2. if connection estiablished, send the command to output the measurements continuously;
+3. if tcp socket data ready:
+3.1 read data
+3.2 append the message in the queue and split to get complete message;
+3.3 dispatch complete message;
+3.4 split the measurement messages into DIST and RSSI
+3.5 decompose the DIST and RSSI to get the measurements for each point
+3.6 construct the ros laser scan message and publish message

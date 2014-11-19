@@ -1,0 +1,11 @@
+<package>
+	<name>transformation</name>
+	<version>0.0.0</version>
+	<description>
+        this application listen to the inertial node and publish the transformation information (tf);
+	</description>
+	<maintainer email="chen0510566@163.com">Chen Cheng</maintainer>
+	<license>BSD</license>
+	<author>Chen Cheng</author>
+	<buildtool_depend>catkin</buildtool_depend>
+</package>

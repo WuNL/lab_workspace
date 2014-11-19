@@ -1,0 +1,11 @@
+<package>
+	<name>lms2_to_pc</name>
+	<version>0.0.0</version>
+	<description>
+	transform lms2Scan to point cloud;
+	</description>
+	<maintainer email="chen0510566@163.com">Chen Cheng</maintainer>
+	<license>BSD</license>
+	<author>Chen Cheng</author>
+	<buildtool_depend>catkin</buildtool_depend>
+</package>

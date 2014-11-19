@@ -1,0 +1,11 @@
+<package>
+	<name>lms2</name>
+	<version>0.0.0</version>
+	<description>
+	lms511 driver, this program will sample data from the right lms511 (IP: 192.168.200.32);
+	</description>
+	<maintainer email="chen0510566@163.com">Chen Cheng</maintainer>
+	<license>BSD</license>
+	<author>Chen Cheng</author>
+	<buildtool_depend>catkin</buildtool_depend>
+</package>
