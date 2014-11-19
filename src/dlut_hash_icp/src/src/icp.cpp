@@ -200,7 +200,7 @@ Eigen::Matrix4f Icp::icpFit()
         {
             search_result = voxelize2->neighbor_search(m_1_copy,m_2,iter->first);
 
-            if(iter->second.p<0.85)
+            if(iter->second.p<0.6)
             {
 
                 continue;
