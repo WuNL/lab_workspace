@@ -18,9 +18,7 @@
 #include <pcl/registration/ia_ransac.h>
 using namespace std;
 
-
 typedef boost::unordered_map<unordered_map_voxel,un_key> umap;
-
 
 class LS_Param //least_square_param
 {
@@ -33,9 +31,6 @@ class LS_Param //least_square_param
         double lamada1;
 };
 
-
-
-
 class Icp
 {
     public:
@@ -46,19 +41,26 @@ class Icp
         bool voxel_Merge(unordered_map_voxel &v1 , unordered_map_voxel &v2);//合并匹配对，计算出CT行向量
         bool linear_System();//建立Ax=b的线性模型
         bool correction();//校正
+        //是否匹配完成
+        //初步的想法是连续两次迭代的旋转平移量很小的话就判定为已经收敛
+        bool is_Fit(double angle_x,double angle_y,double angle_z,Vector3d shift_t);
 
         Eigen::Matrix4f icpFit();
 
     private:
         Matrix3d R;
         Vector3d t;
+
         umap& m_1;
         umap& m_2;
+
         vector<LS_Param> mat_param;
         LS_Param temp_ls;
         umap m_1_copy;
         pcl::PointCloud<pcl::PointXYZ> cloud_source;
+
         bool first_iter;
+        bool _is_Fit;
 
         double jd_real;
         double jd_x;
@@ -68,7 +70,5 @@ class Icp
         std::ofstream RT;
 
 };
-
-
 
 #endif

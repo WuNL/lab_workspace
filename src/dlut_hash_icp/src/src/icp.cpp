@@ -17,6 +17,7 @@ Icp::Icp(umap &m1, umap &m2,pcl::PointCloud<pcl::PointXYZ> &cloud,double jd):
     m_2(m2),
     cloud_source(cloud),
     first_iter(true),
+    _is_Fit(false),
     jd_real(jd)
 {
     m_1_copy = m_1;
@@ -88,6 +89,7 @@ void Icp::least_Square()
     //cout <<"算得的旋转角弧度为："<<x(2)<<endl;
     RT<<"算得的旋转矩阵:\n"<<R<<endl;
     RT<<"t=\n"<<t<<endl;
+    _is_Fit=is_Fit(x(0),x(1),x(2),result_t);
 }
 bool Icp::voxel_Merge(unordered_map_voxel &v1,unordered_map_voxel &v2)
 {
@@ -211,7 +213,6 @@ Eigen::Matrix4f Icp::icpFit()
                 unordered_map_voxel v2(iter->first.x(),iter->first.y(),iter->first.z());
                 voxel_Merge(v1,v2);
             }
-
         }
 
         double t2 = ros::Time::now().toSec();
@@ -220,6 +221,7 @@ Eigen::Matrix4f Icp::icpFit()
             break;
         linear_System();
         least_Square();
+        cout<<"迭代完成标志:_is_Fit="<<_is_Fit<<endl;
         iter_count++;
 
         double t3 = ros::Time::now().toSec();
@@ -239,4 +241,16 @@ Eigen::Matrix4f Icp::icpFit()
     cout <<"transformation_matrix=\n"<<transformation_matrix<<endl;
     //cout <<"匹配时间为："<<(t4-t0)<<endl;
     return transformation_matrix;
+}
+
+bool Icp::is_Fit(double angle_x,double angle_y,double angle_z,Vector3d shift_t)
+{
+    double criterion_angle=3.1415926*5/180;
+    double criterion_shift=0.1;
+    double angle=(angle_x+angle_y+angle_z);
+    double shift=(shift_t(0)+shift_t(1)+shift_t(2));
+    if((angle<criterion_angle)&&(shift<criterion_shift))
+        return true;
+    else
+        return false;
 }
