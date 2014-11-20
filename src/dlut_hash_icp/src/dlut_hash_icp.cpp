@@ -48,6 +48,7 @@ int main(int argc,char** argv)
     pcl::PointCloud<pcl::PointXYZ> cloud_fil;
     pcl::PointCloud<pcl::PointXYZ> cloud_fil1;
 
+    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_unmerged(new pcl::PointCloud<pcl::PointXYZ>);
 
     pcl::PCDReader reader;
     reader.read<pcl::PointXYZ>("3.pcd",*cloud);
@@ -58,30 +59,27 @@ int main(int argc,char** argv)
     cout <<"cloud.size="<<cloud->size()<<endl;
 
     boost::unordered_map<unordered_map_voxel,un_key> m1;
-/*
- *
- *    pcl::VoxelGrid<pcl::PointXYZ> sor;
- *    sor.setInputCloud(cloud);
- *    sor.setLeafSize(0.01f,0.01f,0.01f);
- *    sor.filter(cloud_fil);
- *
- */
-    double t1 = ros::Time::now().toSec();
-    voxelize1->generateUmap(cloud_fil,0.3,m1);
-    double t2 = ros::Time::now().toSec();
-    cout <<"划分栅格时间="<<(t2-t1)<<endl;
-    cout <<"cloud_fil.size="<<cloud_fil.size()<<endl;
 
+    pcl::VoxelGrid<pcl::PointXYZ> sor;
+    sor.setInputCloud(cloud);
+    sor.setLeafSize(0.01f,0.01f,0.01f);
+    sor.filter(cloud_fil);
 
+    voxelize1->generateUmap(*cloud,0.3,m1);
 
-    reader.read<pcl::PointXYZ>("3.pcd",*cloud1);
+    reader.read<pcl::PointXYZ>("4.pcd",*cloud1);
     pcl::removeNaNFromPointCloud(*cloud1,*cloud1, indices);
-/*
- *    sor.setInputCloud(cloud);
- *    sor.setLeafSize(0.01f,0.01f,0.01f);
- *    sor.filter(cloud_fil);
- *
- */
+
+    sor.setInputCloud(cloud1);
+    sor.setLeafSize(0.01f,0.01f,0.01f);
+    sor.filter(cloud_fil1);
+
+    *cloud_unmerged=(cloud_fil+cloud_fil1);
+    pcl::PCDWriter writer;
+    writer.write("un_merged.pcd",*cloud_unmerged);
+
+
+
     cout <<"cloud1.size="<<cloud1->size()<<endl;
     boost::unordered_map<unordered_map_voxel,un_key> m2;
     voxelize1->generateUmap(*cloud1,0.3,m2);
@@ -139,7 +137,13 @@ int main(int argc,char** argv)
     */
 
     Icp testicp(m1,m2,cloud_fil,0);
-    testicp.icpFit();
+    Eigen::Matrix4f tf_mat=testicp.icpFit();
+    pcl::transformPointCloud(cloud_fil,cloud_fil,tf_mat);
+    cloud->clear();
+    *cloud=(cloud_fil+cloud_fil1);
+
+    writer.write("merged.pcd",*cloud);
+
 
     delete voxelize1;
 
