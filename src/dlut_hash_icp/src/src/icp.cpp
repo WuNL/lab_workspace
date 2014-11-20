@@ -1,8 +1,8 @@
 /*************************************************************************
-	> File Name: icp.cpp
-	> Author: 吴乃亮
-	> Mail: wunailiang@gmail.com
-	> Created Time: Thu 22 May 2014 09:14:34 AM CST
+  > File Name: icp.cpp
+  > Author: 吴乃亮
+  > Mail: wunailiang@gmail.com
+  > Created Time: Thu 22 May 2014 09:14:34 AM CST
  ************************************************************************/
 
 #include<iostream>
@@ -82,8 +82,8 @@ void Icp::least_Square()
     //jd_z+=x(2);
     //cout <<"计算的旋转角弧度(绕x,y,z轴)为：=\t"<<jd_x<<"\t"<<jd_y<<"\t"<<jd_z<<endl;
     //cout <<"误差为百分制："<<100*(jd_real+jd_z)/jd_real<<endl;
-    //cout <<"迭代中的旋转矩阵R=" <<endl<<result_R <<endl;
-    //cout <<"算得的平移向量t=" <<endl<<result_t <<endl;
+    cout <<"迭代中的旋转矩阵R=" <<endl<<result_R <<endl;
+    cout <<"算得的平移向量t=" <<endl<<result_t <<endl;
 
     //cout <<"算得的旋转角弧度为："<<x(2)<<endl;
     RT<<"算得的旋转矩阵:\n"<<R<<endl;
@@ -151,11 +151,11 @@ bool Icp::correction()
     //更新栅格参数，包括u,v1,v3,9D,S
     for(umap::iterator iter=m_1_copy.begin();iter!=m_1_copy.end();iter++)
     {
-        iter->second.u = R*(iter->second.u)+t;
-        iter->second.v1.real() = R*(iter->second.v1.real());
-        iter->second.v3.real() = R*(iter->second.v3.real());
-        iter->second.vector_9D << iter->second.u,iter->second.v1.real(),iter->second.v3.real();
-        iter->second.matS = R*iter->second.matS*R.transpose();
+    iter->second.u = R*(iter->second.u)+t;
+    iter->second.v1.real() = R*(iter->second.v1.real());
+    iter->second.v3.real() = R*(iter->second.v3.real());
+    iter->second.vector_9D << iter->second.u,iter->second.v1.real(),iter->second.v3.real();
+    iter->second.matS = R*iter->second.matS*R.transpose();
     }
     */
     pcl::PointCloud<pcl::PointXYZ> transformed_cloud;
@@ -200,9 +200,8 @@ Eigen::Matrix4f Icp::icpFit()
         {
             search_result = voxelize2->neighbor_search(m_1_copy,m_2,iter->first);
 
-            if(iter->second.p<0.6)
+            if(iter->second.p<0.85)
             {
-
                 continue;
             }
 
@@ -216,7 +215,7 @@ Eigen::Matrix4f Icp::icpFit()
         }
 
         double t2 = ros::Time::now().toSec();
-        cout <<"匹配对个数="<<mat_param.size()<<"\tsearch time ="<<(t2-t1)<<endl;
+        cout <<"匹配对个数="<<mat_param.size()<<endl;
         if(mat_param.size()<90)
             break;
         linear_System();
@@ -230,14 +229,14 @@ Eigen::Matrix4f Icp::icpFit()
     delete voxelize2;
 
     double t4 = ros::Time::now().toSec();
-     Eigen::Matrix4f transformation_matrix;
-     transformation_matrix.setZero();
+    Eigen::Matrix4f transformation_matrix;
+    transformation_matrix.setZero();
     //构造旋转平移矩阵T
     transformation_matrix (0,0) = R(0,0);transformation_matrix (0,1) = R(0,1);transformation_matrix (0,2) = R(0,2);
     transformation_matrix (1,0) = R(1,0);transformation_matrix (1,1) = R(1,1);transformation_matrix (1,2) = R(1,2);
     transformation_matrix (2,0) = R(2,0);transformation_matrix (2,1) = R(2,1);transformation_matrix (2,2) = R(2,2);
     transformation_matrix (0,3) = t(0);transformation_matrix (1,3) = t(1);transformation_matrix (2,3) = t(2);
     cout <<"transformation_matrix=\n"<<transformation_matrix<<endl;
-   //cout <<"匹配时间为："<<(t4-t0)<<endl;
+    //cout <<"匹配时间为："<<(t4-t0)<<endl;
     return transformation_matrix;
 }
