@@ -44,6 +44,7 @@ class Icp
         //是否匹配完成
         //初步的想法是连续两次迭代的旋转平移量很小的话就判定为已经收敛
         bool is_Fit(double angle_x,double angle_y,double angle_z,Vector3d shift_t);
+        bool end_of_iteration(const vector<bool>& result);
 
         Eigen::Matrix4f icpFit();
 

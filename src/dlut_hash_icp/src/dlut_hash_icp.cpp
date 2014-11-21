@@ -77,7 +77,7 @@ int main(int argc,char** argv)
     tf_distored(1,0)=sin(theta);
     tf_distored(1,1)=cos(theta);
     tf_distored(0,3)=0.1;
-    tf_distored(1,3)=0.1;
+    tf_distored(1,3)=0.5;
     pcl::transformPointCloud(cloud_fil,cloud_fil,tf_distored);
 
     voxelize1->generateUmap(cloud_fil,0.3,m1);
@@ -160,29 +160,6 @@ int main(int argc,char** argv)
     writer.write("merged.pcd",*cloud);
 
     delete voxelize1;
-
-
-    /*
-       MatrixXd A(2,6);
-       VectorXd b(6);
-       b <<1,2,3,4,5,6;
-       RowVectorXd c = b.transpose();
-       cout <<b<<endl;
-       cout <<c <<endl;
-       for(int i=0;i<7;i++)
-       {
-       }
-    //cout << A <<endl;
-    */
-    /*
-       MatrixXf A = MatrixXf::Random(3, 2);
-       cout << "Here is the matrix A:\n" << A << endl;
-       VectorXf b = VectorXf::Random(3);
-       cout << "Here is the right hand side b:\n" << b << endl;
-       cout << "The least-squares solution is:\n"
-       << A.jacobiSvd(ComputeThinU | ComputeThinV).solve(b) << endl;
-       */
-    //cout << sin(3.14)<<endl;
     cout << "hello icp" <<endl;
     return 0;
 }

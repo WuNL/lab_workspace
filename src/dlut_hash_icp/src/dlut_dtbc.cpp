@@ -122,7 +122,7 @@ int main(int argc,char** argv)
         num_of_scan++;
         pcl::transformPointCloud(*cloud,*cloud,tf_mat);
         *cloud_local_temp += *cloud;
-        //if(num_of_scan %3 == 0 )
+        //if(num_of_scan %3 )
         {
             cloud_local->swap(*cloud_local_temp);
             cloud_local_temp->clear();
