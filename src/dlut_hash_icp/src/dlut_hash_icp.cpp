@@ -71,7 +71,7 @@ int main(int argc,char** argv)
      * 做一个旋转平移矩阵打乱匹配点云
      */
     Eigen::Matrix4f tf_distored=Eigen::Matrix4f::Identity();
-    double theta=3.1415926/6;
+    double theta=3.1415926/1000;
     tf_distored(0,0)=cos(theta);
     tf_distored(0,1)=-sin(theta);
     tf_distored(1,0)=sin(theta);
