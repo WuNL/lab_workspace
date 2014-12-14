@@ -100,6 +100,8 @@ namespace pcdviewer {
 
             std::string file = path.toLatin1().data();
             pcl::PointCloud<pcl::PointXYZ>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZ>);
+            pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_fi (new pcl::PointCloud<pcl::PointXYZ>);
+            pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_fil (new pcl::PointCloud<pcl::PointXYZ>);
             pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_f (new pcl::PointCloud<pcl::PointXYZ>);
 
 
@@ -108,8 +110,25 @@ namespace pcdviewer {
             pcl::PCDReader reader;
 
             reader.read<pcl::PointXYZ> (file, *cloud);
+            cout<<"cloud->size="<<cloud->size()<<"\t";
+
+            pcl::VoxelGrid<pcl::PointXYZ> sor;
+            sor.setInputCloud(cloud);
+            sor.setLeafSize(0.01f,0.01f,0.03f);
+            sor.filter(*cloud_fi);
+            cout<<"cloud_fi->size="<<cloud_fi->size()<<endl;
+
+/*
+ *
+ *            pcl::StatisticalOutlierRemoval<pcl::PointXYZ> sor1;
+ *            sor1.setInputCloud (cloud_fi);
+ *            sor1.setMeanK (100);
+ *            sor1.setStddevMulThresh (1.5);
+ *            sor1.filter (*cloud_fil);
+ *
+ */
             pcl::PassThrough<pcl::PointXYZ> pass;
-            pass.setInputCloud (cloud);
+            pass.setInputCloud (cloud_fi);
             pass.setFilterFieldName ("z");
             pass.setFilterLimits (0.1, 2.5);
             //pass.setFilterLimitsNegative (true);

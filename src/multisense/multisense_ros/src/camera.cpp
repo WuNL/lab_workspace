@@ -144,7 +144,6 @@ bool publishPointCloud(int64_t                       imageFrameId,
                        const std::vector<cv::Vec3f>& points,
                        const uint8_t*                imageP,
                        const uint32_t                colorChannels,
-                       const uint32_t                borderClip,
                        const float                   maxRange,
                        bool                          writeColorPacked,
                        bool                          organized)
@@ -173,41 +172,36 @@ bool publishPointCloud(int64_t                       imageFrameId,
                        std::numeric_limits<float>::quiet_NaN(),
                        std::numeric_limits<float>::quiet_NaN());
 
-    //
-    // When publishing organized pointclouds the number of points in the
-    // pointcloud should be equal to the size of the disparity image. The
-    // default border clip logic does not publish points which are not
-    // in the border region. We want to modify the logic to publish Nan
-    // points in the border regions meaning we need to iterate over the entire
-    // reprojected image.
-    const uint32_t clipRegion = organized ? 0 : borderClip;
 
-    for(uint32_t i=clipRegion; i<(height - clipRegion); ++i)
-        for(uint32_t j=clipRegion; j<(width - clipRegion); ++j) {
+    for(uint32_t i=0; i<height; ++i)
+        for(uint32_t j=0; j<width; ++j) {
 
             const uint32_t index = i * width + j;
 
             const uint32_t* pointP = reinterpret_cast<const uint32_t*>(&points[index]);
             uint32_t* targetCloudP = reinterpret_cast<uint32_t*>(cloudP);
 
-            if (organized) {
-                //
-                // If the point is in a border region or it is invalid publish
-                // a Nan point
-                if (i < borderClip || i > height - borderClip ||
-                    j < borderClip || j > width - borderClip ||
-                    false == isValidPoint(points[index], maxRange)) {
 
+            //
+            // When creating an organized pointcloud replace invalid points
+            // with NaN points
+
+            if (false == isValidPoint(points[index], maxRange))
+            {
+                if (organized)
+                {
                     pointP = reinterpret_cast<const uint32_t*>(&nanPoint[0]);
                 }
-
-            } else {
-                if (false == isValidPoint(points[index], maxRange))
+                else
+                {
                     continue;
+                }
             }
+
 
             //
             // Directly copy points to eliminate memcpy
+
             targetCloudP[0] = pointP[0];
             targetCloudP[1] = pointP[1];
             targetCloudP[2] = pointP[2];
@@ -220,6 +214,7 @@ bool publishPointCloud(int64_t                       imageFrameId,
             // Write the poincloud packed if specified or the color image
             // is BGR. Copying is optimized to eliminate memcpy operations
             // increasing overall speed
+
             if (writeColorPacked || colorChannels > 2)
             {
                 switch(colorChannels)
@@ -242,6 +237,10 @@ bool publishPointCloud(int64_t                       imageFrameId,
                 } color;
 
                 color.value = 0;
+
+                //
+                // We only need to copy 2 values since this case only
+                // applies for images with color channels of 1 or 2 bytes
 
                 color.bytes[0] = sourceColorP[0];
                 color.bytes[1] = sourceColorP[1] & ((colorChannels > 1) * 255);
@@ -369,6 +368,8 @@ Camera::Camera(Channel* driver,
     left_disparity_pub_(),
     right_disparity_pub_(),
     left_disparity_cost_pub_(),
+    left_stereo_disparity_pub_(),
+    right_stereo_disparity_pub_(),
     raw_cam_data_pub_(),
     raw_cam_config_pub_(),
     raw_cam_cal_pub_(),
@@ -389,6 +390,8 @@ Camera::Camera(Channel* driver,
     left_disparity_image_(),
     left_disparity_cost_image_(),
     right_disparity_image_(),
+    left_stereo_disparity_(),
+    right_stereo_disparity_(),
     got_raw_cam_left_(false),
     got_left_luma_(false),
     left_luma_frame_id_(0),
@@ -412,14 +415,17 @@ Camera::Camera(Channel* driver,
     points_buff_(),
     points_buff_frame_id_(-1),
     q_matrix_(4, 4, 0.0),
-    pc_border_clip_(10),
     pc_max_range_(15.0f),
     pc_color_frame_sync_(true),
+    disparities_(0),
     stream_lock_(),
     stream_map_(),
     last_frame_id_(-1),
     luma_color_depth_(1),
-    write_pc_color_packed_(false)
+    write_pc_color_packed_(false),
+    border_clip_type_(0),
+    border_clip_value_(0.0),
+    border_clip_lock_()
 {
     //
     // Query device and version information from sensor
@@ -453,14 +459,15 @@ Camera::Camera(Channel* driver,
     raw_cam_config_pub_ = calibration_nh.advertise<multisense_ros::RawCamConfig>("raw_cam_config", 1, true);
     histogram_pub_      = device_nh_.advertise<multisense_ros::Histogram>("histogram", 5);
 
-
     //
     // Change the way the luma pointcloud is published for ST21 sensors
+
     if (system::DeviceInfo::HARDWARE_REV_MULTISENSE_ST21 == device_info_.hardwareRevision) {
 
         //
         // Luma images are 16 bit so when copying to the point cloud
         // structure copy 2 bytes
+
         luma_color_depth_ = 2;
     }
 
@@ -472,11 +479,7 @@ Camera::Camera(Channel* driver,
         left_mono_cam_pub_  = left_mono_transport_.advertise("image_mono", 5,
                               boost::bind(&Camera::connectStream, this, Source_Luma_Left),
                               boost::bind(&Camera::disconnectStream, this, Source_Luma_Left));
-        /*
-        left_rect_cam_pub_  = left_rect_transport_.advertiseCamera("image_rect", 5,
-                              boost::bind(&Camera::connectStream, this, Source_Luma_Left),
-                              boost::bind(&Camera::disconnectStream, this, Source_Luma_Left));
-        */
+
         left_rgb_cam_pub_   = left_rgb_transport_.advertise("image_color", 5,
                               boost::bind(&Camera::connectStream, this, Source_Jpeg_Left),
                               boost::bind(&Camera::disconnectStream, this, Source_Jpeg_Left));
@@ -490,7 +493,29 @@ Camera::Camera(Channel* driver,
         left_rgb_rect_cam_info_pub_  = left_nh_.advertise<sensor_msgs::CameraInfo>("image_rect_color/camera_info", 1, true);
 
 
-    } else {  // all MultiSense-S* variations
+    } else if (system::DeviceInfo::HARDWARE_REV_MULTISENSE_M == device_info_.hardwareRevision) {
+
+        // monocular variation
+
+        left_mono_cam_pub_  = left_mono_transport_.advertise("image_mono", 5,
+                              boost::bind(&Camera::connectStream, this, Source_Luma_Left),
+                              boost::bind(&Camera::disconnectStream, this, Source_Luma_Left));
+        left_rect_cam_pub_  = left_rect_transport_.advertiseCamera("image_rect", 5,
+                              boost::bind(&Camera::connectStream, this, Source_Luma_Rectified_Left),
+                              boost::bind(&Camera::disconnectStream, this, Source_Luma_Rectified_Left));
+        left_rgb_cam_pub_   = left_rgb_transport_.advertise("image_color", 5,
+                              boost::bind(&Camera::connectStream, this, Source_Luma_Left | Source_Chroma_Left),
+                              boost::bind(&Camera::disconnectStream, this, Source_Luma_Left | Source_Chroma_Left));
+        left_rgb_rect_cam_pub_ = left_rgb_rect_transport_.advertiseCamera("image_rect_color", 5,
+                                 boost::bind(&Camera::connectStream, this, Source_Luma_Left | Source_Chroma_Left),
+                                 boost::bind(&Camera::disconnectStream, this, Source_Luma_Left | Source_Chroma_Left));
+
+        left_mono_cam_info_pub_     = left_nh_.advertise<sensor_msgs::CameraInfo>("image_mono/camera_info", 1, true);
+        left_rect_cam_info_pub_     = left_nh_.advertise<sensor_msgs::CameraInfo>("image_rect/camera_info", 1, true);
+        left_rgb_cam_info_pub_      = left_nh_.advertise<sensor_msgs::CameraInfo>("image_color/camera_info", 1, true);
+        left_rgb_rect_cam_info_pub_ = left_nh_.advertise<sensor_msgs::CameraInfo>("image_rect_color/camera_info", 1, true);
+
+    } else {  // all other MultiSense-S* variations
 
 
         left_mono_cam_pub_  = left_mono_transport_.advertise("image_mono", 5,
@@ -549,11 +574,20 @@ Camera::Camera(Channel* driver,
                               boost::bind(&Camera::connectStream, this, Source_Disparity),
                               boost::bind(&Camera::disconnectStream, this, Source_Disparity));
 
+        left_stereo_disparity_pub_ = left_nh_.advertise<stereo_msgs::DisparityImage>("disparity_image", 5,
+                              boost::bind(&Camera::connectStream, this, Source_Disparity),
+                              boost::bind(&Camera::disconnectStream, this, Source_Disparity));
+
         if (version_info_.sensorFirmwareVersion >= 0x0300) {
 
             right_disparity_pub_ = disparity_right_transport_.advertise("disparity", 5,
                                    boost::bind(&Camera::connectStream, this, Source_Disparity_Right),
                                    boost::bind(&Camera::disconnectStream, this, Source_Disparity_Right));
+
+            right_stereo_disparity_pub_ = right_nh_.advertise<stereo_msgs::DisparityImage>("disparity_image", 5,
+                                  boost::bind(&Camera::connectStream, this, Source_Disparity_Right),
+                                  boost::bind(&Camera::disconnectStream, this, Source_Disparity_Right));
+
             left_disparity_cost_pub_ = disparity_cost_transport_.advertise("cost", 5,
                                    boost::bind(&Camera::connectStream, this, Source_Disparity_Cost),
                                    boost::bind(&Camera::disconnectStream, this, Source_Disparity_Cost));
@@ -785,17 +819,6 @@ Camera::Camera(Channel* driver,
 
     driver_->addIsolatedCallback(histCB, allImageSources, this);
 
-    //
-    // Get the border clip, if any
-
-    const char *pcBorderClipEnvStringP = getenv("MULTISENSE_ROS_PC_BORDER_CLIP");
-    if (NULL != pcBorderClipEnvStringP) {
-        int32_t tmp = atoi(pcBorderClipEnvStringP);
-        if (tmp > 0) {
-            pc_border_clip_ = atoi(pcBorderClipEnvStringP);
-            ROS_INFO("pc_border_clip: %d", pc_border_clip_);
-        }
-    }
 
     //
     // Disable color point cloud strict frame syncing, if desired
@@ -951,7 +974,11 @@ void Camera::disparityImageCallback(const image::Header& header)
           (Source_Disparity_Right == header.source &&
            right_disparity_pub_.getNumSubscribers() > 0) ||
           (Source_Disparity_Cost == header.source &&
-           left_disparity_cost_pub_.getNumSubscribers() > 0)))
+           left_disparity_cost_pub_.getNumSubscribers() > 0) ||
+          (Source_Disparity == header.source &&
+           left_stereo_disparity_pub_.getNumSubscribers() > 0) ||
+          (Source_Disparity_Right == header.source &&
+           right_stereo_disparity_pub_.getNumSubscribers() > 0) ))
         return;
 
     const uint32_t imageSize = (header.width * header.height * header.bitsPerPixel) / 8;
@@ -967,6 +994,8 @@ void Camera::disparityImageCallback(const image::Header& header)
         sensor_msgs::CameraInfo    *camInfoP = NULL;
         image_transport::Publisher *pubP     = NULL;
         ros::Publisher *camInfoPubP          = NULL;
+        ros::Publisher *stereoDisparityPubP  = NULL;
+        stereo_msgs::DisparityImage *stereoDisparityImageP = NULL;
 
 
         if (Source_Disparity == header.source) {
@@ -975,38 +1004,125 @@ void Camera::disparityImageCallback(const image::Header& header)
             imageP->header.frame_id = frame_id_left_;
             camInfoP                = &left_disp_cam_info_;
             camInfoPubP             = &left_disp_cam_info_pub_;
+            stereoDisparityPubP     = &left_stereo_disparity_pub_;
+            stereoDisparityImageP   = &left_stereo_disparity_;
+            stereoDisparityImageP->header.frame_id = frame_id_left_;
         } else {
             pubP                    = &right_disparity_pub_;
             imageP                  = &right_disparity_image_;
             imageP->header.frame_id = frame_id_right_;
             camInfoP                = &right_disp_cam_info_;
             camInfoPubP             = &right_disp_cam_info_pub_;
+            stereoDisparityPubP     = &right_stereo_disparity_pub_;
+            stereoDisparityImageP   = &right_stereo_disparity_;
+            stereoDisparityImageP->header.frame_id = frame_id_right_;
         }
 
-        imageP->data.resize(imageSize);
-        memcpy(&imageP->data[0], header.imageDataP, imageSize);
 
-        imageP->header.stamp    = t;
-        imageP->height          = header.height;
-        imageP->width           = header.width;
-        imageP->is_bigendian    = false;
 
-        switch(header.bitsPerPixel) {
-            case 8:
-                imageP->encoding = "mono8";
-                imageP->step     = header.width;
-                break;
-            case 16:
-                imageP->encoding = "mono16";
-                imageP->step     = header.width * 2;
-                break;
+        if (pubP->getNumSubscribers() > 0)
+        {
+            imageP->data.resize(imageSize);
+            memcpy(&imageP->data[0], header.imageDataP, imageSize);
+
+            imageP->header.stamp    = t;
+            imageP->height          = header.height;
+            imageP->width           = header.width;
+            imageP->is_bigendian    = false;
+
+            switch(header.bitsPerPixel) {
+                case 8:
+                    imageP->encoding = "mono8";
+                    imageP->step     = header.width;
+                    break;
+                case 16:
+                    imageP->encoding = "mono16";
+                    imageP->step     = header.width * 2;
+                    break;
+            }
+
+            pubP->publish(*imageP);
         }
 
-        pubP->publish(*imageP);
+        if (stereoDisparityPubP->getNumSubscribers() > 0)
+        {
+            //
+            // If our current image resolution is using non-square pixels, i.e.
+            // fx != fy then warn the user. This support is lacking in
+            // stereo_msgs::DisparityImage and stereo_image_proc
+
+            if (right_rect_cam_info_.P[0] != right_rect_cam_info_.P[5])
+            {
+                std::stringstream warning;
+                warning << "Current camera configuration has non-square pixels (fx != fy).";
+                warning << "The stereo_msgs/DisparityImage does not account for";
+                warning << " this. Be careful when reprojecting to a pointcloud.";
+                ROS_WARN("%s", warning.str().c_str());
+            }
+
+            //
+            // Our final floating point image will be serialized into uint8_t
+            // meaning we need to allocate 4 bytes per pixel
+
+            uint32_t floatingPointImageSize = header.width * header.height * 4;
+            stereoDisparityImageP->image.data.resize(floatingPointImageSize);
+
+            stereoDisparityImageP->header.stamp = t;
+
+            stereoDisparityImageP->image.height = header.height;
+            stereoDisparityImageP->image.width = header.width;
+            stereoDisparityImageP->image.is_bigendian = false;
+            stereoDisparityImageP->image.header.stamp = t;
+            stereoDisparityImageP->image.header.frame_id = stereoDisparityImageP->header.frame_id;
+            stereoDisparityImageP->image.encoding = "32FC1";
+            stereoDisparityImageP->image.step = 4 * header.width;
+
+
+            //
+            // Fx is the same for both the right and left cameras
+
+            stereoDisparityImageP->f = right_rect_cam_info_.P[0];
+
+            //
+            // Our Tx is negative. The DisparityImage message expects Tx to be
+            // positive
+
+            stereoDisparityImageP->T = fabs(right_rect_cam_info_.P[3] /
+                                       right_rect_cam_info_.P[0]);
+            stereoDisparityImageP->min_disparity = 0;
+            stereoDisparityImageP->max_disparity = disparities_;
+            stereoDisparityImageP->delta_d = 1./16.;
+
+            //
+            // The stereo_msgs::DisparityImage message expects the disparity
+            // image to be floating point. We will use OpenCV to perform our
+            // element-wise division
+
+
+            cv::Mat_<uint16_t> tmpImage(header.height,
+                                        header.width,
+                                        reinterpret_cast<uint16_t*>(
+                                        const_cast<void*>(header.imageDataP)));
+
+            //
+            // We will copy our data directly into our output message
+
+            cv::Mat_<float> floatingPointImage(header.height,
+                                               header.width,
+                                               reinterpret_cast<float*>(&stereoDisparityImageP->image.data[0]));
+
+            //
+            // Convert our disparity to floating point by dividing by 16 and
+            // copy the result to the output message
+
+            floatingPointImage = tmpImage / 16.0;
+
+            stereoDisparityPubP->publish(*stereoDisparityImageP);
+        }
 
         camInfoP->header = imageP->header;
+        camInfoP->header.stamp = t;
         camInfoPubP->publish(*camInfoP);
-
 
         break;
     }
@@ -1174,7 +1290,6 @@ void Camera::rectCallback(const image::Header& header)
                           luma_cloud_step,
                           points_buff_,
                           &(left_rect_image_.data[0]), luma_color_depth_,
-                          pc_border_clip_,
                           pc_max_range_,
                           write_pc_color_packed_,
                           false);
@@ -1191,7 +1306,6 @@ void Camera::rectCallback(const image::Header& header)
                           luma_cloud_step,
                           points_buff_,
                           &(left_rect_image_.data[0]), luma_color_depth_,
-                          pc_border_clip_,
                           pc_max_range_,
                           write_pc_color_packed_,
                           true);
@@ -1346,6 +1460,8 @@ void Camera::pointCloudCallback(const image::Header& header)
         0 == color_organized_point_cloud_pub_.getNumSubscribers())
         return;
 
+    boost::mutex::scoped_lock lock(border_clip_lock_);
+
     const bool      handle_missing = true;
     const uint32_t  imageSize      = header.height * header.width;
 
@@ -1388,6 +1504,16 @@ void Camera::pointCloudCallback(const image::Header& header)
     }
 
     //
+    // Apply the border clip mask making all the points in the border clip region
+    // invalid. Only do this if we have selected a border clip value
+
+    if ( border_clip_value_ > 0)
+    {
+        points.setTo(cv::Vec3f(10000.0, 10000.0, 10000.0), border_clip_mask_);
+    }
+
+
+    //
     // Store the disparity frame ID
 
     points_buff_frame_id_ = header.frameId;
@@ -1407,7 +1533,6 @@ void Camera::pointCloudCallback(const image::Header& header)
                       luma_cloud_step,
                       points_buff_,
                       &(left_rect_image_.data[0]), luma_color_depth_,
-                      pc_border_clip_,
                       pc_max_range_,
                       write_pc_color_packed_,
                       false);
@@ -1424,7 +1549,6 @@ void Camera::pointCloudCallback(const image::Header& header)
                       color_cloud_step,
                       points_buff_,
                       &(left_rgb_rect_image_.data[0]), 3,
-                      pc_border_clip_,
                       pc_max_range_,
                       write_pc_color_packed_,
                       false);
@@ -1441,7 +1565,6 @@ void Camera::pointCloudCallback(const image::Header& header)
                       luma_cloud_step,
                       points_buff_,
                       &(left_rect_image_.data[0]), luma_color_depth_,
-                      pc_border_clip_,
                       pc_max_range_,
                       write_pc_color_packed_,
                       true);
@@ -1458,7 +1581,6 @@ void Camera::pointCloudCallback(const image::Header& header)
                       color_cloud_step,
                       points_buff_,
                       &(left_rgb_rect_image_.data[0]), 3,
-                      pc_border_clip_,
                       pc_max_range_,
                       write_pc_color_packed_,
                       true);
@@ -1677,7 +1799,6 @@ void Camera::colorImageCallback(const image::Header& header)
                                       color_cloud_step,
                                       points_buff_,
                                       &(left_rgb_rect_image_.data[0]), 3,
-                                      pc_border_clip_,
                                       pc_max_range_,
                                       write_pc_color_packed_,
                                       false);
@@ -1694,7 +1815,6 @@ void Camera::colorImageCallback(const image::Header& header)
                                       color_cloud_step,
                                       points_buff_,
                                       &(left_rgb_rect_image_.data[0]), 3,
-                                      pc_border_clip_,
                                       pc_max_range_,
                                       write_pc_color_packed_,
                                       true);
@@ -1725,11 +1845,14 @@ void Camera::queryConfig()
 
     const image::Config& c = image_config_;
 
+    disparities_ = c.disparities();
+
     //
     // Frame IDs must match for the rectified images
 
     left_rect_cam_info_.header.frame_id  = frame_id_left_;
-    right_rect_cam_info_.header.frame_id = left_rect_cam_info_.header.frame_id;
+    left_rect_cam_info_.header.stamp     = ros::Time::now();
+    right_rect_cam_info_.header          = left_rect_cam_info_.header;
 
     left_rect_cam_info_.width  = c.width();
     left_rect_cam_info_.height = c.height();
@@ -1749,11 +1872,14 @@ void Camera::queryConfig()
     right_rect_cam_info_.P[6]   = c.cy();      right_rect_cam_info_.P[7]  = 0.0;
     right_rect_cam_info_.P[10]  = 1.0;         right_rect_cam_info_.P[11] = 0.0;
 
+
     //
     // Populate our other camera_info topics (except mono topics)
+
     left_disp_cam_info_ = left_rect_cam_info_;
     right_disp_cam_info_ = right_rect_cam_info_;
     left_cost_cam_info_ = left_rect_cam_info_;
+    left_rgb_rect_cam_info_ = left_rect_cam_info_;
 
     //
     // Compute the Q matrix here, as image_geometery::StereoCameraModel does
@@ -1775,7 +1901,6 @@ void Camera::queryConfig()
     //
     // For local rectification of color images
 
-    left_rgb_rect_cam_info_ = left_rect_cam_info_;
 
     if (calibration_map_left_1_)
         cvReleaseMat(&calibration_map_left_1_);
@@ -1816,7 +1941,7 @@ void Camera::queryConfig()
     // Populate the left and right mono camera_info messages after our
     // P matrices for the left and right cameras have been scaled
 
-    left_mono_cam_info_.header.frame_id = left_rect_cam_info_.header.frame_id;
+    left_mono_cam_info_.header = left_rect_cam_info_.header;
     left_mono_cam_info_.width = left_rect_cam_info_.width;
     left_mono_cam_info_.height = left_rect_cam_info_.height;
     left_mono_cam_info_.K[0] = cal.left.M[0][0];    left_mono_cam_info_.K[1] = cal.left.M[0][1];
@@ -1828,6 +1953,7 @@ void Camera::queryConfig()
     //
     // Distortion coefficients follow OpenCV's convention.
     // k1, k2, p1, p2, k3, k4, k5, k6
+
     left_mono_cam_info_.D.resize(8);
     for (uint8_t i=0 ; i < 8 ; ++i) {
         left_mono_cam_info_.D[i] = cal.left.D[i];
@@ -1839,6 +1965,7 @@ void Camera::queryConfig()
     // model and the simplified 5 parameter plum_bob model. If the last 3
     // parameters of the distortion model are 0 then the camera is using
     // the simplified plumb_bob model
+
     if (cal.left.D[7] == 0.0 && cal.left.D[6] == 0.0 && cal.left.D[5] == 0.0) {
         left_mono_cam_info_.distortion_model = sensor_msgs::distortion_models::PLUMB_BOB;
     } else {
@@ -1851,6 +1978,7 @@ void Camera::queryConfig()
     left_mono_cam_info_.R[6] = cal.left.R[2][0];     left_mono_cam_info_.R[7] = cal.left.R[2][1];
     left_mono_cam_info_.R[8] = cal.left.R[2][2];
 
+    right_mono_cam_info_.header.stamp = left_mono_cam_info_.header.stamp;
     right_mono_cam_info_.header.frame_id = frame_id_right_;
     right_mono_cam_info_.width = left_rect_cam_info_.width;
     right_mono_cam_info_.height = left_rect_cam_info_.height;
@@ -1864,6 +1992,7 @@ void Camera::queryConfig()
     //
     // Distortion coefficients follow OpenCV's convention.
     // k1, k2, p1, p2, k3, k4, k5, k6
+
     right_mono_cam_info_.D.resize(8);
     for (uint8_t i=0 ; i < 8 ; ++i) {
         right_mono_cam_info_.D[i] = cal.right.D[i];
@@ -1874,6 +2003,7 @@ void Camera::queryConfig()
     // model and the simplified 5 parameter plum_bob model. If the last 3
     // parameters of the distortion model are 0 then the camera is using
     // the simplified plumb_bob model
+
     if (cal.right.D[7] == 0.0 && cal.right.D[6] == 0.0 && cal.right.D[5] == 0.0) {
         right_mono_cam_info_.distortion_model = "plumb_bob";
     } else {
@@ -1888,8 +2018,8 @@ void Camera::queryConfig()
 
     //
     // Populate the unrectified color image camera_info
-    left_rgb_cam_info_ = left_mono_cam_info_;
 
+    left_rgb_cam_info_ = left_mono_cam_info_;
 
     //
     // Publish the "raw" config message
@@ -1914,6 +2044,138 @@ void Camera::queryConfig()
     cfg.yaw   = c.yaw();
 
     raw_cam_config_pub_.publish(cfg);
+
+    //
+    // Update the border clipping mask since the resolution changed
+
+    generateBorderClip(border_clip_type_, border_clip_value_, c.height(), c.width());
+
+    //
+    // Republish our camera info topics since the resolution changed
+
+    updateCameraInfo();
+}
+
+void Camera::updateCameraInfo()
+{
+
+    //
+    // Republish camera info messages outside of image callbacks.
+    // The camera info publishers are latching so the messages
+    // will persist until a new message is published in one of the image
+    // callbacks. This makes it easier when a user is trying access a camera_info
+    // for a topic which they are not subscribed to
+
+    if (system::DeviceInfo::HARDWARE_REV_BCAM == device_info_.hardwareRevision) {
+
+        left_mono_cam_info_pub_.publish(left_mono_cam_info_);
+        left_rgb_cam_info_pub_.publish(left_rgb_cam_info_);
+        left_rgb_rect_cam_info_pub_.publish(left_rgb_rect_cam_info_);
+
+    } else if (system::DeviceInfo::HARDWARE_REV_MULTISENSE_M == device_info_.hardwareRevision) {
+
+        left_mono_cam_info_pub_.publish(left_mono_cam_info_);
+        left_rect_cam_info_pub_.publish(left_rect_cam_info_);
+        left_rgb_cam_info_pub_.publish(left_rgb_cam_info_);
+        left_rgb_rect_cam_info_pub_.publish(left_rgb_rect_cam_info_);
+
+    } else {  // all other MultiSense-S* variations
+
+        if (system::DeviceInfo::HARDWARE_REV_MULTISENSE_ST21 != device_info_.hardwareRevision) {
+
+            left_rgb_cam_info_pub_.publish(left_rgb_cam_info_);
+            left_rgb_rect_cam_info_pub_.publish(left_rgb_rect_cam_info_);
+        }
+
+        if (version_info_.sensorFirmwareVersion >= 0x0300) {
+
+            right_disp_cam_info_pub_.publish(right_disp_cam_info_);
+            left_cost_cam_info_pub_.publish(left_cost_cam_info_);
+        }
+
+        left_mono_cam_info_pub_.publish(left_mono_cam_info_);
+        left_rect_cam_info_pub_.publish(left_rect_cam_info_);
+        right_mono_cam_info_pub_.publish(right_mono_cam_info_);
+        right_rect_cam_info_pub_.publish(right_rect_cam_info_);
+        left_disp_cam_info_pub_.publish(left_disp_cam_info_);
+
+    }
+}
+
+void Camera::borderClipChanged(int borderClipType, double borderClipValue)
+{
+    //
+    // This assumes the image resolution did not change and will just use
+    // the current mask size as width and height arguments
+
+    generateBorderClip(borderClipType, borderClipValue, border_clip_mask_.rows, border_clip_mask_.cols);
+
+}
+
+void Camera::generateBorderClip(int borderClipType, double borderClipValue, uint32_t height, uint32_t width)
+{
+
+    boost::mutex::scoped_lock lock(border_clip_lock_);
+
+    border_clip_type_ = borderClipType;
+    border_clip_value_ = borderClipValue;
+
+    //
+    // Reset the border clip mask
+
+    border_clip_mask_ = cv::Mat_<uint8_t>(height, width, static_cast<uint8_t>(255));
+
+    //
+    // Manually generate our disparity border clipping mask. Points with
+    // a value of 255 are excluded from the pointcloud. Points with a value of 0
+    // are included
+
+    double halfWidth = static_cast<double>(width)/2.0;
+    double halfHeight = static_cast<double>(height)/2.0;
+
+    //
+    // Precompute the maximum radius from the center of the image for a point
+    // to be considered in the circle
+
+    double radius = sqrt( pow( halfWidth, 2) + pow( halfHeight, 2) );
+    radius -= borderClipValue;
+
+    for (uint32_t u = 0 ; u < width ; ++u)
+    {
+        for (uint32_t v = 0 ; v < height ; ++v)
+        {
+            switch (borderClipType)
+            {
+                case RECTANGULAR:
+                {
+                    if ( u >= borderClipValue && u <= width - borderClipValue &&
+                         v >= borderClipValue && v <= height - borderClipValue)
+                    {
+                        border_clip_mask_(v, u) = 0;
+                    }
+
+                    break;
+                }
+                case CIRCULAR:
+                {
+                    double vector = sqrt( pow( halfWidth - u, 2) +
+                                          pow( halfHeight - v, 2) );
+
+                    if ( vector < radius)
+                    {
+                        border_clip_mask_(v, u) = 0;
+                    }
+
+                    break;
+                }
+                default:
+                {
+                    ROS_WARN("Unknown border clip type.");
+                    return;
+                }
+            }
+        }
+    }
 }
 
 void Camera::stop()

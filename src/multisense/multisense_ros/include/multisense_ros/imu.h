@@ -41,7 +41,7 @@
 #include <sensor_msgs/Imu.h>
 
 #include <multisense_lib/MultiSenseChannel.hh>
-
+#include <geometry_msgs/Vector3Stamped.h>
 namespace multisense_ros {
 
 class Imu {
@@ -72,11 +72,13 @@ private:
     ros::Publisher gyroscope_pub_;
     ros::Publisher magnetometer_pub_;
 
+    ros::Publisher mag_pub_;
     ros::Publisher imu_pub_;
 
     //
     // IMU message
     sensor_msgs::Imu imu_message_;
+    geometry_msgs::Vector3Stamped mag_message_;
 
     //
     // Publish control

@@ -39,6 +39,7 @@
 #include <ros/ros.h>
 #include <multisense_ros/RawCamData.h>
 #include <sensor_msgs/PointCloud2.h>
+#include <stereo_msgs/DisparityImage.h>
 #include <image_geometry/stereo_camera_model.h>
 #include <image_transport/image_transport.h>
 #include <image_transport/camera_publisher.h>
@@ -65,6 +66,8 @@ public:
     void jpegImageCallback(const crl::multisense::image::Header& header);
     void histogramCallback(const crl::multisense::image::Header& header);
 
+    void borderClipChanged(int borderClipType, double borderClipValue);
+
 private:
 
     //
@@ -78,6 +81,18 @@ private:
     // Query sensor status and calibration
 
     void queryConfig();
+
+    //
+    // Update camera info messages by publishing the most current messages
+    // Used whenever the resolution of the camera changes
+
+    void updateCameraInfo();
+
+    //
+    // Grenerate border clips for point clouds
+
+    void generateBorderClip(int borderClipType, double borderClipValue, uint32_t width, uint32_t height);
+
 
     //
     // CRL sensor API
@@ -146,6 +161,9 @@ private:
     image_transport::Publisher       right_disparity_pub_;
     image_transport::Publisher       left_disparity_cost_pub_;
 
+    ros::Publisher                   left_stereo_disparity_pub_;
+    ros::Publisher                   right_stereo_disparity_pub_;
+
     //
     // Raw data publishers
 
@@ -175,6 +193,9 @@ private:
     sensor_msgs::Image         left_disparity_image_;
     sensor_msgs::Image         left_disparity_cost_image_;
     sensor_msgs::Image         right_disparity_image_;
+
+    stereo_msgs::DisparityImage left_stereo_disparity_;
+    stereo_msgs::DisparityImage right_stereo_disparity_;
 
     bool                       got_raw_cam_left_;
     bool                       got_left_luma_;
@@ -215,9 +236,14 @@ private:
     std::vector<cv::Vec3f>        points_buff_;
     int64_t                       points_buff_frame_id_;
     cv::Mat_<double>              q_matrix_;
-    uint32_t                      pc_border_clip_;
     float                         pc_max_range_;
     bool                          pc_color_frame_sync_;
+
+
+    //
+    // Current maximum number of disparities
+
+    uint32_t                      disparities_;
 
     //
     // Stream subscriptions
@@ -241,6 +267,21 @@ private:
     // it will be static_cast to a flat and interpreted literally
 
     bool write_pc_color_packed_;
+
+    //
+    // Enum to determine border clipping types
+
+    enum clip_type_ {RECTANGULAR, CIRCULAR};
+
+    int border_clip_type_;
+    double border_clip_value_;
+
+    //
+    // The mask used to perform the border clipping of the disparity image
+
+    cv::Mat_<uint8_t> border_clip_mask_;
+
+    boost::mutex border_clip_lock_;
 };
 
 }

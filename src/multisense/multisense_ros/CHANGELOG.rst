@@ -2,6 +2,31 @@
 Changelog for package multisense_ros
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+3.4.0 (2014-12-11)
+------------------
+* Updated LibMultiSense to version 3.5. Fixed camera_info publishing bug for non-standard cameras (BCAM, Multisense-M, ST21). Added HDR option to dynamic reconfigure.
+* Contributors: Matt Alvarado <malvarado@carnegierobotics.com>
+
+3.3.9 (2014-12-08)
+------------------
+* Added reconfigurable border clipping options for the output pointclouds.
+* Contributors: Matt Alvarado <malvarado@carnegierobotics.com>
+
+3.3.8 (2014-12-02)
+------------------
+* Added stereo_msgs/DisparityImage publishing for both left and right disparity images. Added latched default camera_info publishing for all image topics. Updated rosbuild multisense_ros CMakeLists.txt to build color_laser_publisher.
+* Contributors: Matt Alvarado <malvarado@carnegierobotics.com>
+
+3.3.7 (2014-11-25)
+------------------
+* Added support for the MultiSense Moncular camera.
+* Contributors: Matt Alvarado <malvarado@carnegierobotics.com>
+
+3.3.6 (2014-11-10)
+------------------
+* Added libturbojpeg dependency to multisense_ros. Based on pull request https://bitbucket.org/crl/multisense_ros/pull-request/5/added-libturbojpeg-to-dependencies-for/diff
+* Contributors: Matt Alvarado <malvarado@carnegierobotics.com>
+
 3.3.5 (2014-11-03)
 ------------------
 

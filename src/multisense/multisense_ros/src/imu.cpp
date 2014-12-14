@@ -57,8 +57,10 @@ Imu::Imu(Channel* driver, std::string tf_prefix) :
     accelerometer_pub_(),
     gyroscope_pub_(),
     magnetometer_pub_(),
+    mag_pub_(),
     imu_pub_(),
     imu_message_(),
+    mag_message_(),
     sub_lock_(),
     total_subscribers_(0)
 {
@@ -69,6 +71,7 @@ Imu::Imu(Channel* driver, std::string tf_prefix) :
     // transform from the /gyro to the /accel frame to the gyroscope data
 
     imu_message_.header.frame_id = tf_prefix + "/accel";
+    mag_message_.header.frame_id = tf_prefix + "/mag";
 
     //
     // Covariance matrix for linear acceleration and angular velocity were
@@ -143,6 +146,9 @@ Imu::Imu(Channel* driver, std::string tf_prefix) :
         imu_pub_           = imu_nh_.advertise<sensor_msgs::Imu>("imu_data", 20,
                                                boost::bind(&Imu::startStreams, this),
                                                boost::bind(&Imu::stopStreams, this));
+        mag_pub_ = imu_nh_.advertise<geometry_msgs::Vector3Stamped>("mag",20,
+                                               boost::bind(&Imu::startStreams, this),
+                                               boost::bind(&Imu::stopStreams, this));
 
         driver_->addIsolatedCallback(imuCB, this);
     }
@@ -162,6 +168,7 @@ void Imu::imuCallback(const imu::Header& header)
     uint32_t gyro_subscribers = gyroscope_pub_.getNumSubscribers();
     uint32_t mag_subscribers = magnetometer_pub_.getNumSubscribers();
     uint32_t imu_subscribers = imu_pub_.getNumSubscribers();
+    uint32_t mag_new_subscribers = imu_pub_.getNumSubscribers();
 
     for(; it != header.samples.end(); ++it) {
 
@@ -176,6 +183,11 @@ void Imu::imuCallback(const imu::Header& header)
         msg.z = s.z;
 
         imu_message_.header.stamp = msg.time_stamp;
+        mag_message_.header.stamp=msg.time_stamp;
+
+        mag_message_.vector.x = s.x;
+        mag_message_.vector.y = s.y;
+        mag_message_.vector.z = s.z;
 
         switch(s.type) {
         case imu::Sample::Type_Accelerometer:
@@ -215,9 +227,10 @@ void Imu::imuCallback(const imu::Header& header)
             break;
         case imu::Sample::Type_Magnetometer:
 
-            if (mag_subscribers > 0)
+            if (mag_subscribers > 0){
                 magnetometer_pub_.publish(msg);
-
+                }
+                mag_pub_.publish(mag_message_);
             break;
         }
     }
