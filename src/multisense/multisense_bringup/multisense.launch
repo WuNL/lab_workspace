@@ -5,7 +5,7 @@
   <arg name="ip_address" default="10.66.171.21" />
   <arg name="namespace"  default="multisense" />
   <arg name="mtu"        default="7200" />
-  <arg name="sensor"     default="SL" />
+  <arg name="sensor"     default="S7" />
 
   <param name="robot_description"
          textfile="$(find multisense_description)/urdf/multisense$(arg sensor).urdf"/>
@@ -17,6 +17,10 @@
     <param name="tf_prefix" value="/$(arg namespace)" />
   </node>
 
+    <param name="multisense/fps"   value="15.0" />
+    <param name="multisense/lighting"   value="true" />
+    <param name="/multisense/led_duty_cycle"   value="0.1" />
+    <param name="/multisense/border_clip_value"   value="150" />
   <!-- ROS Driver -->
    <node pkg="multisense_ros" ns="$(arg namespace)" type="ros_driver" name="multisense_driver" output="screen">
      <param name="robot_description"
